@@ -1,4 +1,5 @@
 import torch
+import pcl_mlp
 
 class FeedForward(torch.nn.Module):
     def __init__(
@@ -17,6 +18,8 @@ class FeedForward(torch.nn.Module):
         if layer_type == 0:
             self.fc = torch.nn.Linear(self.input_size, self.hidden_size)
 
+        elif layer_type == 1:
+            self.fc = pcl_mlp.XsmmLinear(input_size, hidden_size)
         """
         if use_sparse_kernels:
             self.fc1 = pcl_mlp.XsmmLinear(input_size, hidden_size)
@@ -50,7 +53,14 @@ class LinearNet():
         linear_layer_list = [FeedForward(input_size, hidden_size)]
 
         for n in range(num_layers-1):
-            linear_layer_list.append(FeedForward(hidden_size, hidden_size))
+            linear_layer_list.append(FeedForward(hidden_size, hidden_size, layer_type=layer_type))
+
+        if layer_type == 0:
+            print("Using native torch.nn.Linear")
+        elif layer_type == 1:
+            print("Using dense libxsmm linear layer")
+        elif layer_type == 2:
+            print("Using sparse libxsmm linear layer")
 
         linear_layer_list.append(FeedForward(hidden_size, 1, last_layer=True))
 

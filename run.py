@@ -4,8 +4,8 @@ import torch
 
 import time
 
-def run_training(N, C, K):
-    lnet = LinearNet(input_size=C, hidden_size=K)
+def run_training(N, C, K, layer_type=0):
+    lnet = LinearNet(input_size=C, hidden_size=K, layer_type=layer_type)
     model = lnet.model
     md = MockDataset(n_samples=N, n_features=C)
 
@@ -52,8 +52,19 @@ def run_training(N, C, K):
     print("Average BP time: {}".format(t_bp/epoch))
     print()
 
+
+print("For native torch.nn.Linear")
 run_training(320, 128, 128)
+"""
 run_training(320, 256, 256)
 run_training(320, 512, 512)
 run_training(320, 1024, 1024)
 run_training(320, 2048, 2048)
+"""
+
+print("For dense libxsmm Linear")
+run_training(320, 128, 128, layer_type=1)
+run_training(320, 256, 256, layer_type=1)
+run_training(320, 512, 512, layer_type=1)
+run_training(320, 1024, 1024, layer_type=1)
+run_training(320, 2048, 2048, layer_type=1)
