@@ -587,8 +587,10 @@ at::Tensor mlp_forward(void *libxsmm_handle_, torch::Tensor input, torch::Tensor
   auto nbk = weight.size(0);
   auto bk = weight.size(3);
 
+  /*
   printf("input shape: (%d, %d)\n", input.size(0), input.size(1));
   printf("weight shape: (%d, %d)\n", weight.size(0), weight.size(1));
+  */
   auto output = at::empty({nbn, nbk, bn, bk}, input.options());
   //std::cout << "FWD Handle = " << libxsmm_handle_ << std::endl;
   libxsmm_dnn_fullyconnected_set_ptr_helper(libxsmm_handle, LIBXSMM_DNN_REGULAR_INPUT, input, "Input");

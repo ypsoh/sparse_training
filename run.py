@@ -4,15 +4,27 @@ import torch
 
 import time
 
-def run_training(N, C, K, layer_type=0):
-    lnet = LinearNet(input_size=C, hidden_size=K, layer_type=layer_type)
+def run_training(N, C, K, layer_type=0, use_gpu=False, sparsity=0.0):
+    lnet = LinearNet(input_size=C, hidden_size=K, layer_type=layer_type, sparsity=sparsity)
     model = lnet.model
+
     md = MockDataset(n_samples=N, n_features=C)
 
     x_train = md.x_train
     y_train = md.y_train
     x_test = md.x_test
     y_test = md.y_test
+
+    if torch.cuda.is_available() and use_gpu:
+        dev="cuda:0"
+
+        device = torch.device(dev)
+        model.to(device)
+
+        x_train = x_train.to(device)
+        y_train = y_train.to(device)
+        x_test = x_test.to(device)
+        y_test = y_test.to(device)
 
     # Define training settings
     criterion = torch.nn.BCELoss()
@@ -53,18 +65,39 @@ def run_training(N, C, K, layer_type=0):
     print()
 
 
+"""
 print("For native torch.nn.Linear")
 run_training(320, 128, 128)
-"""
 run_training(320, 256, 256)
 run_training(320, 512, 512)
 run_training(320, 1024, 1024)
 run_training(320, 2048, 2048)
 """
 
+
+"""
+print("For native torch.nn.Linear on GPU")
+run_training(320, 128, 128, use_gpu=True)
+run_training(320, 256, 256, use_gpu=True)
+run_training(320, 512, 512, use_gpu=True)
+run_training(320, 1024, 1024, use_gpu=True)
+run_training(320, 2048, 2048, use_gpu=True)
+"""
+
+"""
 print("For dense libxsmm Linear")
 run_training(320, 128, 128, layer_type=1)
 run_training(320, 256, 256, layer_type=1)
 run_training(320, 512, 512, layer_type=1)
 run_training(320, 1024, 1024, layer_type=1)
 run_training(320, 2048, 2048, layer_type=1)
+"""
+
+print("For sparse libxsmm Linear")
+run_training(320, 128, 128, sparsity=0.9, layer_type=2)
+"""
+run_training(320, 256, 256, sparsity=0.9, layer_type=2)
+run_training(320, 512, 512, sparsity=0.9, layer_type=2)
+run_training(320, 1024, 1024, sparsity=0.9, layer_type=2)
+run_training(320, 2048, 2048, sparsity=0.9, layer_type=2)
+"""

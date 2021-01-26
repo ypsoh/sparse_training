@@ -82,7 +82,7 @@ class XsmmFC(Function):
             # For later backward pass
             XsmmFC.use_sparse_kernels = True
         else:
-            print("Using DENSE kernels for forward pass")
+            #print("Using DENSE kernels for forward pass")
             output = pcl_mlp_ext.forward(handle.handle, input, weight, bias)
         #t2 = time.time()
         #print("XsmmFCFWD: q=%.3f" % ((t2-t1)*1000.0))
@@ -115,7 +115,7 @@ class XsmmFC(Function):
 
             grad_bias = grad_output.sum(axis=0)
         else:
-            print("Using DENSE kernels for backward pass")
+            #print("Using DENSE kernels for backward pass")
             grad_input, grad_weight, grad_bias = pcl_mlp_ext.backward(handle.handle, grad_output, input, weight)
 
         return (grad_input, grad_weight, grad_bias, None, None, None)
@@ -304,10 +304,6 @@ class XsmmLinear(nn.Module):
 
 
         tic = time.time()
-        if self.xsmm_code_pointer == None:
-            self.xsmm_code_pointer = XsmmCodePointer(self.desc, wtensor)
-
-        print("Code pointer created: {}".format(time.time() - tic))
 
         # Check weight sparsity
         n_el = 1
@@ -319,6 +315,10 @@ class XsmmLinear(nn.Module):
         # Change threshold to a smarter value
         use_sparse_kernels = True if sparsity > 0.6 else False
         #use_sparse_kernels = False
+
+        if self.xsmm_code_pointer == None and use_sparse_kernels:
+            self.xsmm_code_pointer = XsmmCodePointer(self.desc, wtensor)
+            print("Code pointer created: {}".format(time.time() - tic))
 
         output =  XsmmFC.apply(input, wtensor, btensor, self.xsmm_handle, self.xsmm_code_pointer, use_sparse_kernels)
         if not self.output_stays_blocked:
