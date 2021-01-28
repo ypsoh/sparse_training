@@ -45,9 +45,9 @@ class XsmmCodePointer:
         elif pass_type == "UPD":
             self.code_pointer = pcl_mlp_ext.create_code_pointer(desc.desc, weight, 2)
 
-        """
     def __del__(self):
         pass
+        """
         if self.code_pointer:
             print(self.code_pointer)
             pcl_mlp_ext.destroy_code_pointer(self.code_pointer)
@@ -67,6 +67,7 @@ class XsmmFC(Function):
 
         if use_sparse_kernels:
             print("Using SPARSE kernels for forward pass")
+
             """
             output = pcl_mlp_ext.sparse_forward(handle.handle, input, weight, bias)
             """

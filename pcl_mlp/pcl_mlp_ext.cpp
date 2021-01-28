@@ -432,7 +432,6 @@ at::Tensor mlp_sparse_forward(
               nnz++;
               colptr[l_k + 1]++;
           }
-          l_B[l_k * C + l_c] = (float)tmp;
       }
   }
 
@@ -448,9 +447,16 @@ at::Tensor mlp_sparse_forward(
   for (l_k = 0; l_k < K; l_k++) {
       int offset = colptr[l_k];
       for (l_c = 0; l_c < C; l_c++) {
-          if (l_B[l_k * C + l_c] != 0) {
+
+          int nbk_idx = l_k / KB;
+          int nbc_idx = l_c / CB;
+          int bk_idx = l_k % KB;
+          int bc_idx = l_c % CB;
+
+          tmp = (float)weight[nbk_idx][nbc_idx][bc_idx][bk_idx].item().to<float>();
+          if (tmp != 0) {
               rowidx[offset] = l_c;
-              values[offset] = l_B[l_k * C + l_c];
+              values[offset] = tmp;
               offset++;
           }
       }
@@ -1204,11 +1210,12 @@ void *mlp_create_code_pointer(
         row_size = K;
     }
 
-
     /* Scope through weight tensor B */
     int nnz = 0;
 
-    unsigned int *colptr = (unsigned int*)libxsmm_aligned_malloc((col_size+1) * sizeof(unsigned int), 64);
+    unsigned int *colptr = (unsigned int*)libxsmm_aligned_malloc(
+            (col_size+1) * sizeof(unsigned int), 64);
+
     colptr[0] = 0;
 
     float tmp = 0.0;
@@ -1345,6 +1352,7 @@ at::Tensor mlp_execute_sparse_fwd(
         torch::Tensor weight,
         torch::Tensor bias)
 {
+    // Rehydrate sparse_xsmm_handle
     sparse_xsmm_handle * sp_handle = (sparse_xsmm_handle*)sp_handle_;
 
     /* Prep variables */
@@ -1372,14 +1380,22 @@ at::Tensor mlp_execute_sparse_fwd(
     for (int l_n = 0; l_n < N / NB; ++l_n) {
         for (int l_c = 0; l_c < C / CB; ++l_c) {
             for (int l_nn = 0; l_nn < NB / nb; ++l_nn) {
-                // for (int l_cc = 0; l_cc < CB; ++l_cc) {
-                //    for (int l_nnn = 0; l_nnn < nb; ++l_nnn) {
+                for (int l_cc = 0; l_cc < CB; ++l_cc) {
+                    for (int l_nnn = 0; l_nnn < nb; ++l_nnn) {
+                        int i = l_nn * nb + l_nnn;
+                        int j = l_cc;
 
+                        // printf("accessing index i, j: (%d, %d, %d, %d)\n", l_n, l_c, i, j);
+                        LIBXSMM_VLA_ACCESS(5, l_p_A, l_n, l_c, l_nn, l_cc,
+                            l_nnn, C / CB, NB / nb, CB, nb) = (float)input[l_n][l_c][i][j].item().to<float>();
+
+                        /* An attempt to to vectorized copy 
                         float* ptr = (float*)input[l_n][l_c].data_ptr();
                         std::copy(ptr, ptr+CB*nb, l_A);
+                        */
                     }
-                // }
-            // } 
+                }
+            } 
         }
     }
 
@@ -1406,7 +1422,6 @@ at::Tensor mlp_execute_sparse_fwd(
     auto t_prepare_output_end = high_resolution_clock::now();
 
     /* Convert weight; We might not need this */
-    /*
     for (int l_k = 0; l_k < K; l_k++) {
         for (int l_c = 0; l_c < C; l_c++) {
             int nbk_idx = l_k / KB;
@@ -1416,26 +1431,186 @@ at::Tensor mlp_execute_sparse_fwd(
             l_B[l_k * C + l_c] = (float)weight[nbk_idx][nbc_idx][bc_idx][bk_idx].item().to<float>();
         }
     }
-    */
+
+
+    /**
+     * Reusing sp_handle
+     **/
 
     auto t_execute_microkernels = high_resolution_clock::now();
-
-    /* Cast void pointer to libxsmm_smmfunction */
+    /*
+    // Cast void pointer to libxsmm_smmfunction
     libxsmm_smmfunction * fwd_kernels = sp_handle->microkernels;
+    float ** b_values = sp_handle->values;
 
-    /* Execute microkernels */
+    // Execute microkernels
     int k, n, c;
 #ifdef _OPENMP
 #   pragma omp parallel for LIBXSMM_OPENMP_COLLAPSE(2) private(k,n,c)
 #endif
     for (k = 0; k < K / KB; ++k) {
         for (n = 0; n < N / NB; ++n) {
-            sp_handle->microkernels[k * C / CB + c](
+            fwd_kernels[k * C / CB + c](
                     &(l_A[(n * C / CB + c) * CB * NB]),
-                    sp_handle->values[k * C / CB + c],
+                    b_values[k * C / CB + c],
                     &(l_C[(n * K / KB + k) * NB * KB]));
         }
     }
+    */
+
+    /**
+     * Testing old method
+     */
+
+    /*
+    int l_k, l_c;
+    int bc = CB;
+    auto bk = weight.size(3);
+    */
+    printf("new \n");
+
+
+    /*
+  libxsmm_gemm_prefetch_type prefetch = LIBXSMM_GEMM_PREFETCH_NONE;
+  int flags = LIBXSMM_GEMM_FLAGS('N', 'N');
+
+  int nnz = 0;
+  float tmp = 0.0;
+  unsigned int *colptr = (unsigned int *)libxsmm_aligned_malloc((K + 1) * sizeof(unsigned int), 64);
+  colptr[0] = 0;
+  for (l_k = 0; l_k < K; l_k++) {
+      colptr[l_k + 1] = 0;
+      for (l_c = 0; l_c < C; l_c++) {
+          int nbk_idx = l_k / bk;
+          int nbc_idx = l_c / bc;
+          int bk_idx = l_k % bk;
+          int bc_idx = l_c % bc;
+          // tmp = (float)weight[l_k][l_c].item().to<float>();
+          tmp = (float)weight[nbk_idx][nbc_idx][bc_idx][bk_idx].item().to<float>();
+          if (tmp == 0.0) {
+            // pass
+          }
+          else {
+              nnz++;
+              colptr[l_k + 1]++;
+          }
+      }
+  }
+  */
+
+  // Seems to work correctly
+  // printf("sparsity of B: %f\n", (float)(nnz)/(float)(K*C));
+
+    /*
+  for (l_k = 0; l_k < K; l_k++) {
+      colptr[l_k + 1] += colptr[l_k];
+  }
+  unsigned int *rowidx =
+      (unsigned int *)libxsmm_aligned_malloc(nnz * sizeof(unsigned int), 64);
+  float *values = (float *)libxsmm_aligned_malloc(nnz * sizeof(float), 64);
+  for (l_k = 0; l_k < K; l_k++) {
+      int offset = colptr[l_k];
+      for (l_c = 0; l_c < C; l_c++) {
+
+          int nbk_idx = l_k / KB;
+          int nbc_idx = l_c / CB;
+          int bk_idx = l_k % KB;
+          int bc_idx = l_c % CB;
+
+          tmp = (float)weight[nbk_idx][nbc_idx][bc_idx][bk_idx].item().to<float>();
+          if (tmp != 0) {
+              rowidx[offset] = l_c;
+              values[offset] = tmp;
+              offset++;
+          }
+      }
+  }
+  */
+    /*
+  unsigned num_k_blocks = K / KB;
+  unsigned num_c_blocks = C / CB;
+  int num_blocks = num_k_blocks * num_c_blocks;
+  unsigned int **b_colptr = (unsigned int **)libxsmm_aligned_malloc(
+          num_blocks * sizeof(unsigned int *), 64);
+  unsigned int **b_rowidx = (unsigned int **)libxsmm_aligned_malloc(
+          num_blocks * sizeof(unsigned int *), 64);
+  float **b_values =
+      (float **)libxsmm_aligned_malloc(num_blocks * sizeof(float *), 64);
+  int *nnzb = (int *)libxsmm_aligned_malloc(num_blocks * sizeof(int), 64);
+  int blk_idx;
+  for (blk_idx = 0; blk_idx < num_blocks; ++blk_idx) {
+      b_colptr[blk_idx] = (unsigned int *)libxsmm_aligned_malloc(
+              (KB + 1) * sizeof(unsigned int), 64);
+  }
+  BlockSpMatStep1(K, C, KB, CB, colptr, rowidx, b_colptr, nnzb);
+  for (blk_idx = 0; blk_idx < num_blocks; ++blk_idx) {
+      b_rowidx[blk_idx] = (unsigned int *)libxsmm_aligned_malloc(
+              nnzb[blk_idx] * sizeof(unsigned int), 64);
+      b_values[blk_idx] =
+          (float *)libxsmm_aligned_malloc(nnzb[blk_idx] * sizeof(float), 64);
+  }
+  BlockSpMatStep2(K, C, KB, CB, colptr, rowidx, values, b_colptr, b_rowidx,
+          b_values);
+
+  */
+  /* Compare b_values between old and new*/
+
+  /*
+  for (int i=10; i<100; ++i) {
+      printf("%d \t %d\n", sp_handle->col_ptr[0][i], b_colptr[0][i]);
+  }
+
+  printf("\n\n\n");
+
+  for (int i=10; i<100; ++i) {
+      printf("%d \t %d\n", sp_handle->row_idx[0][i], b_rowidx[0][i]);
+  }
+  */
+
+  /* Create FWD kernels */
+  /*
+  float alpha = 1.0;
+  float beta = 1.0;
+  */
+  /*
+  libxsmm_descriptor_blob l_xgemm_blob;
+  libxsmm_gemm_descriptor **l_xgemm_desc =
+      (libxsmm_gemm_descriptor **)libxsmm_aligned_malloc(
+              num_blocks * sizeof(libxsmm_gemm_descriptor *), 64);
+    */
+  /*
+  libxsmm_smmfunction *mykernel =
+      (libxsmm_smmfunction *)libxsmm_aligned_malloc(
+              num_blocks * sizeof(libxsmm_smmfunction), 64);
+  for (blk_idx = 0; blk_idx < num_blocks; ++blk_idx) {
+      l_xgemm_desc[blk_idx] = libxsmm_gemm_descriptor_dinit(
+              &l_xgemm_blob, LIBXSMM_GEMM_PRECISION(float), NB / nb, KB, CB, CB,
+              0, KB, alpha, beta, flags, prefetch);
+      mykernel[blk_idx] =
+          libxsmm_create_xcsc_soa(l_xgemm_desc[blk_idx], b_colptr[blk_idx],
+                  b_rowidx[blk_idx],
+                  (const void *)b_values[blk_idx], nb).smm;
+  }
+  */
+
+  // Execute kernels amoung threads
+  //
+    libxsmm_smmfunction * fwd_kernels = sp_handle->microkernels;
+    float ** b_values = sp_handle->values;
+  int k, n, c;
+#ifdef _OPENMP
+#   pragma omp parallel for LIBXSMM_OPENMP_COLLAPSE(2) private(k,n,c)
+#endif
+  for (k = 0; k < K / KB; ++k) {
+      for (n = 0; n < N / NB; ++n) {
+          for (c = 0; c < C / CB; ++c) {
+              fwd_kernels[k * C / CB + c](
+                &(l_A[(n * C / CB + c) * CB * NB]),
+                b_values[k * C / CB + c],
+                &(l_C[(n * K / KB + k) * NB * KB]));
+          }
+      }
+  }
 
     auto t_execute_microkernels_end = high_resolution_clock::now();
     auto t_format_output = t_execute_microkernels_end;
@@ -1471,10 +1646,12 @@ at::Tensor mlp_execute_sparse_fwd(
 
     auto t_format_output_end = high_resolution_clock::now();
 
+    /*
     cout << "Convert input time: " << duration_cast<microseconds>(t_convert_input_end - t_convert_input).count() << "seconds" << endl;
     cout << "Prepare output time: " << duration_cast<microseconds>(t_prepare_output_end - t_prepare_output).count() << "seconds" << endl;
     cout << "Execute microkernel time: " << duration_cast<microseconds>(t_execute_microkernels_end - t_execute_microkernels).count() << "seconds" << endl;
     cout << "Format output time: " << duration_cast<microseconds>(t_format_output_end - t_format_output).count() << "seconds" << endl;
+    */
 
 
     /* Clean up */

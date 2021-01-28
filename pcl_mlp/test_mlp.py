@@ -8,10 +8,10 @@ random.seed(77)
 
 MB = 128 * 8
 N = MB
-K=256 #128
-C=256 #64
-"""
+K=512 #128
+C=512 #64
 
+"""
 MB = 64
 K= 64 #128
 C= 64 #64
@@ -22,7 +22,7 @@ fc = pcl_mlp.XsmmLinear(C, K)
 #fc = pcl_mlp.XsmmLinear(C, K)
 tl = torch.nn.Linear(C, K)
 
-sparsity_rate = 0.8
+sparsity_rate = 0.95
 #sparsity_rate = 0.2
 weight = torch.zeros(K, C, requires_grad=True)
 
