@@ -74,5 +74,3 @@ class LinearNet():
                 prune.random_unstructured(m, name="weight", amount=sparsity)
             elif isinstance(m, pcl_mlp.XsmmLinear):
                 prune.random_unstructured(m, name="weight", amount=sparsity)
-
-        from IPython import embed; embed()
