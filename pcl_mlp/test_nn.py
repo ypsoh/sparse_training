@@ -94,7 +94,7 @@ model = Feedforward(256, 256, use_sparse_kernels=True)
 #model = Feedforward(1024, 512, use_sparse_kernels=True)
 
 # Prune weight
-prune.random_unstructured(model.fc1, name="weight", amount=0.95)
+prune.random_unstructured(model.fc1, name="weight", amount=0.8)
 
 criterion = torch.nn.BCELoss()
 optimizer = torch.optim.SGD(model.parameters(), lr = 0.01)
@@ -125,10 +125,8 @@ for epoch in range(epoch):
     print('Epoch {}: train loss: {}, duration: {}'.format(epoch, loss.item(), te_epoch - ts_epoch))
 
     # Backward pass
-    """
     loss.backward()
     optimizer.step()
-    """
     te = time.time()
 
 te = time.time()
