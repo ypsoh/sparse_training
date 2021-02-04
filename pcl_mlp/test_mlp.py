@@ -6,10 +6,17 @@ import pcl_mlp
 torch.manual_seed(77)
 random.seed(77)
 
+"""
 MB = 128 * 8
 N = MB
 K=512 #128
 C=512 #64
+"""
+
+MB = 64
+N = MB
+K=64 #128
+C=64 #64
 
 """
 MB = 64

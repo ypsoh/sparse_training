@@ -1350,6 +1350,7 @@ at::Tensor mlp_execute_sparse_fwd(
     auto nb = sp_handle->desc->nb;
 
     float *l_A = (float *)libxsmm_aligned_malloc(sizeof(float) * N * C, 64);
+    float *l_AA = (float *)libxsmm_aligned_malloc(sizeof(float) * N * C, 64);
     float *l_B = (float *)libxsmm_aligned_malloc(sizeof(float) * C * K, 64);
     float *l_C = (float *)libxsmm_aligned_malloc(sizeof(float) * N * K, 64);
 
@@ -1358,32 +1359,71 @@ at::Tensor mlp_execute_sparse_fwd(
 
     auto t_convert_input = high_resolution_clock::now();
     /* Convert input */
+    /* How can we byapss LIBXSMM_VLA_DECL...? */
+
+    /*
+       l_n < N / NB N = 128, NB = 64
+       */
+    /*
+    for (int l_n = 0; l_n < N / NB; ++l_n) {
+        for (int l_c = 0; l_c < C / CB; ++l_c) {
+            int offset = l_n * NB + l_c * CB;
+            memcpy(&l_AA[offset], input[l_n][l_c].data_ptr(), NB * CB * sizeof(float));
+            // memcpy(l_A, input[l_n][l_c].data_ptr(), NB * CB * sizeof(float));
+        }
+    }
+    */
+
 #ifdef _OPENMP
   auto nthr = omp_get_max_threads();
-#pragma omp parallel for num_threads(nthr)
+  printf("\n\n max threads: %d\n\n", nthr);
+#endif
+
+
+  /*
+int l_n = 0;
+int l_c = 0;
+int l_nn =0;
+int l_cc = 0;
+int l_nnn = 0;
+*/
+
+#ifdef _OPENMP
+#pragma omp parallel for LIBXSMM_OPENMP_COLLAPSE(4)
 #endif
     for (int l_n = 0; l_n < N / NB; ++l_n) {
         for (int l_c = 0; l_c < C / CB; ++l_c) {
             for (int l_nn = 0; l_nn < NB / nb; ++l_nn) {
                 for (int l_cc = 0; l_cc < CB; ++l_cc) {
+                    float * flat_ptr = (float*)input[l_n][l_c].data_ptr();
                     for (int l_nnn = 0; l_nnn < nb; ++l_nnn) {
                         int i = l_nn * nb + l_nnn;
                         int j = l_cc;
-
                         LIBXSMM_VLA_ACCESS(5, l_p_A, l_n, l_c, l_nn, l_cc,
-                            l_nnn, C / CB, NB / nb, CB, nb) = (float)input[l_n][l_c][i][j].item().to<float>();
-
-                        /* An attempt to to vectorized copy 
-                        float* ptr = (float*)input[l_n][l_c].data_ptr();
-                        std::copy(ptr, ptr+CB*nb, l_A);
-                        */
+                            l_nnn, C / CB, NB / nb, CB, nb) = flat_ptr[i*NB+j];
                     }
                 }
             } 
         }
     }
 
+    // Lets see how l_A is layed out in both cases
+    /*
+    printf("Correct\n");
+    for (int i = 0; i < 100; ++i) {
+        printf("%f\n", l_A[i]);
+    }
+
+    printf("\n\n");
+
+    for (int i = 0; i < 100; ++i) {
+        printf("%f\n", l_AA[i]);
+    }
+    */
+
     auto t_convert_input_end = high_resolution_clock::now();
+
+
     auto t_prepare_output = t_convert_input_end;
 
     /* Prepare output */
@@ -1459,8 +1499,8 @@ at::Tensor mlp_execute_sparse_fwd(
 
     auto t_format_output_end = high_resolution_clock::now();
 
-    /*
     cout << "Convert input time: " << duration_cast<microseconds>(t_convert_input_end - t_convert_input).count() << "seconds" << endl;
+    /*
     cout << "Prepare output time: " << duration_cast<microseconds>(t_prepare_output_end - t_prepare_output).count() << "seconds" << endl;
     cout << "Execute microkernel time: " << duration_cast<microseconds>(t_execute_microkernels_end - t_execute_microkernels).count() << "seconds" << endl;
     cout << "Format output time: " << duration_cast<microseconds>(t_format_output_end - t_format_output).count() << "seconds" << endl;
